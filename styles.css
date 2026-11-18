@@ -38,6 +38,8 @@ body > main {
   --mark: light-dark(#bd502f, #f2a585);
   --ok: light-dark(#e3f1e8, #2d4838);
   --oktxt: light-dark(#25523d, #bedac8);
+  --late: light-dark(#fbe3da, #4b2a21);
+  --latetxt: light-dark(#8a3218, #f4bba6);
   background: var(--paper);
   color: var(--ink);
   font:
@@ -323,6 +325,109 @@ body > main {
   font-size: 12px;
   background: transparent;
 }
+/* Proposed: kit register and return checklist */
+#campus-stores .compare {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#campus-stores .compare button {
+  font-size: 12px;
+  padding: 3px 10px;
+}
+#campus-stores .compare button[aria-pressed="true"] {
+  background: var(--sel);
+  color: var(--inv);
+  border-color: var(--sel);
+}
+#campus-stores .kit {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin-top: 12px;
+  overflow: hidden;
+}
+#campus-stores :is(.kithead, .unit) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 13px;
+}
+#campus-stores .kithead {
+  background: var(--desk);
+}
+#campus-stores :is(.kithead, .unit) small {
+  display: block;
+}
+#campus-stores .unit {
+  border-top: 1px solid var(--line);
+}
+#campus-stores .unit.match {
+  box-shadow: inset 4px 0 0 var(--mark);
+}
+#campus-stores .kitfoot {
+  border-top: 1px solid var(--line);
+  padding: 9px 13px;
+}
+#campus-stores .tag.warn {
+  background: var(--memo);
+  color: var(--memotxt);
+}
+#campus-stores .tag.late {
+  background: var(--late);
+  color: var(--latetxt);
+  font-weight: 600;
+}
+#campus-stores [data-checkin] {
+  border-top: 1px solid var(--line);
+  padding: 4px 13px 2px;
+}
+#campus-stores .hint {
+  margin: 8px 0 4px;
+  color: var(--quiet);
+  font-size: 13px;
+  max-width: 70ch;
+}
+#campus-stores .checkunit {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+#campus-stores .tick {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+#campus-stores .tick small {
+  display: block;
+}
+#campus-stores .tick input {
+  width: 20px;
+  height: 20px;
+  margin: 1px 0 0;
+  padding: 0;
+  flex-shrink: 0;
+  accent-color: var(--sel);
+}
+#campus-stores .stillout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-left: 30px;
+}
+#campus-stores .stillout label {
+  font-size: 13px;
+  font-weight: 600;
+}
+#campus-stores .stillout span {
+  margin-bottom: 3px;
+}
+#campus-stores .stillout select {
+  width: 100%;
+  font-weight: 400;
+}
 @container (max-width:650px) {
   #campus-stores .shell {
     grid-template-columns: minmax(0, 1fr);
@@ -361,6 +466,14 @@ body > main {
   }
   #campus-stores .row {
     gap: 5px;
+  }
+  #campus-stores :is(.kithead, .unit) {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+  }
+  #campus-stores .stillout {
+    grid-template-columns: minmax(0, 1fr);
+    margin-left: 0;
   }
 }
 @media (pointer: coarse) {

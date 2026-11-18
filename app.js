@@ -1,5 +1,5 @@
 (() => {
-  const storageKey = "campus-stores.shift.v1";
+  const storageKey = "campus-stores.shift.v2";
   const root = document.getElementById("campus-stores");
   const q = (selector) => root.querySelector(selector);
   const requests = [
@@ -83,6 +83,15 @@
       text: "You’ve just taken over. Leela walks in with an adapter. Work out what was outstanding from the screening and close the loan for the right item.",
     },
   ];
+  // Minutes from Friday 00:00, so the desk can tell what is late.
+  const clock = [945, 1170, 1980];
+  const dueTimes = {
+    "Fri 8 pm": 1200,
+    "Sat 9 am": 1980,
+    "Sat 10 am": 2040,
+    "Sat noon": 2160,
+  };
+  const dues = Object.keys(dueTimes);
   const pages = [
     ["Requests", "clipboard-list"],
     ["Inventory", "package"],
@@ -90,11 +99,14 @@
     ["Desk book", "messages-square"],
   ];
   const original = () => ({
-    version: 1,
+    version: 2,
+    view: "kits",
     tab: "Requests",
     phase: 0,
     selected: "",
     filter: "All items",
+    person: "",
+    checking: "",
     loans: [
       {
         num: 401,
@@ -114,6 +126,13 @@
   const getAsset = (id) => assets.find((x) => x.id === id);
   const getReq = (id) => requests.find((x) => x.id === id);
   const out = (id) => s.loans.find((l) => l.asset === id && !l.back);
+  const late = (due) => clock[s.phase] > dueTimes[due];
+  const holderOf = (l) => l.holder || l.who;
+  const list = (xs) =>
+    xs.length < 3
+      ? xs.join(" and ")
+      : xs.slice(0, -1).join(", ") + " and " + xs[xs.length - 1];
+  const shelf = (id) => id + " (" + getAsset(id).bin + ")";
   const esc = (x) =>
     String(x).replace(
       /[&<>"']/g,
@@ -158,6 +177,8 @@
     "</div></div>";
   const badge = (t, good = false) =>
     '<span class="tag' + (good ? " good" : "") + '">' + esc(t) + "</span>";
+  const flag = (t, tone) =>
+    '<span class="tag ' + tone + '">' + esc(t) + "</span>";
   function requestPage() {
     let html = head(
       "Approved requests",
@@ -212,9 +233,13 @@
           ? "On loan"
           : "On shelf";
       if (s.filter !== "All items" && s.filter !== status) continue;
+      const o = s.view === "kits" && out(a.id);
       html += row(
         a.id + " · " + a.type,
-        a.model + " · " + a.bin,
+        a.model +
+          " · " +
+          a.bin +
+          (o ? " · with " + holderOf(o) + " · slip L-" + o.num : ""),
         badge(status, status === "On shelf"),
       );
     }
@@ -294,6 +319,160 @@
       );
     return html;
   }
+  // Proposed: the register shows kits (one card per approved request),
+  // built on the same one-slip-per-unit records.
+  function kitRegister() {
+    if (s.editing) return register();
+    let html = head(
+      "Loan register",
+      "Kits by approved request · one slip per physical unit",
+      btn("New issue slip", "new", "", "primary"),
+    );
+    html +=
+      '<div class="buttons">' +
+      ["Outstanding", "All kits"]
+        .map(
+          (v, i) =>
+            '<button type="button" data-action="scope" data-val="' +
+            i +
+            '" aria-pressed="' +
+            (s.onlyOpen === (i === 0)) +
+            '">' +
+            v +
+            "</button>",
+        )
+        .join("") +
+      "<label>Who’s at the counter? <select data-person>" +
+      opts([["", "Anyone"], ...people.map((p) => [p, p])]) +
+      "</select></label></div>";
+    const newest = (k) => Math.max(...k.slips.map((l) => l.num));
+    const kits = requests
+      .map((r) => ({ r, slips: s.loans.filter((l) => l.req === r.id) }))
+      .filter((k) => k.slips.length)
+      .filter((k) => !s.onlyOpen || k.slips.some((l) => !l.back))
+      .filter(
+        (k) =>
+          !s.person ||
+          k.slips.some((l) => l.who === s.person || l.holder === s.person),
+      )
+      .sort((a, b) => newest(b) - newest(a));
+    if (!kits.length)
+      html +=
+        "<p>" +
+        (s.person
+          ? "No kits issued to or held by " + esc(s.person) + "."
+          : "No outstanding kits.") +
+        "</p>";
+    for (const k of kits) html += kitCard(k);
+    return html;
+  }
+  function kitCard({ r, slips }) {
+    const open = slips.filter((l) => !l.back);
+    const types = slips.map((l) => getAsset(l.asset).type);
+    const missing = open.length ? r.items.filter((t) => !types.includes(t)) : [];
+    const who = list([...new Set(slips.map((l) => l.who))]);
+    const summary = !open.length
+      ? badge("All " + slips.length + " back", true)
+      : missing.length
+        ? flag("Issued " + slips.length + " of " + r.items.length, "warn")
+        : flag(
+          open.length + " of " + slips.length + " out",
+          open.some((l) => late(l.promised || l.due)) ? "late" : "",
+        );
+    let html =
+      '<article class="kit"><div class="kithead"><div><h3>' +
+      esc(r.event) +
+      "</h3><small>" +
+      esc(r.id + " · " + r.club + " · collected by " + who) +
+      "</small><small>Return by " +
+      esc(r.due) +
+      "</small></div><div>" +
+      summary +
+      "</div></div>";
+    const checking = s.checking === r.id && open.length;
+    for (const l of slips) {
+      if (checking && !l.back) continue;
+      const a = getAsset(l.asset);
+      let state;
+      if (l.back)
+        state = badge(
+          l.backAt === undefined ? "Back" : "Back " + shifts[l.backAt].time,
+          true,
+        );
+      else if (l.holder)
+        state = flag(
+          "With " + l.holder + " · back by " + l.promised,
+          late(l.promised) ? "late" : "warn",
+        );
+      else
+        state = late(l.due)
+          ? flag("Overdue · was due " + l.due, "late")
+          : flag("Out · due " + l.due, "");
+      const match =
+        s.person && !l.back && holderOf(l) === s.person ? " match" : "";
+      html +=
+        '<div class="unit' +
+        match +
+        '"><div><strong>' +
+        esc(a.id + " · " + a.type) +
+        "</strong><small>" +
+        esc(a.model + " · " + a.bin + " · slip L-" + l.num + " · issued to " + l.who) +
+        "</small></div><div>" +
+        state +
+        "</div></div>";
+    }
+    for (const t of missing)
+      html +=
+        '<div class="unit"><div><strong>' +
+        esc(t) +
+        "</strong><small>Approved on " +
+        esc(r.id) +
+        ", not issued yet</small></div><div>" +
+        flag("Not issued", "warn") +
+        "</div></div>";
+    if (checking) html += checkinForm(r, open);
+    else if (open.length)
+      html +=
+        '<div class="kitfoot">' + btn("Record return", "check", r.id) + "</div>";
+    return html + "</article>";
+  }
+  function checkinForm(r, open) {
+    const pick = (name, label, choices) =>
+      "<label><span>" +
+      label +
+      '</span><select name="' +
+      name +
+      '"><option value="">Select…</option>' +
+      opts(choices.map((c) => [c, c])) +
+      "</select></label>";
+    return (
+      '<form data-checkin="' +
+      esc(r.id) +
+      '"><p class="hint">Tick each unit on the counter once its tag matches. For anything not ticked, record who has it now and when it will be back.</p>' +
+      open
+        .map((l) => {
+          const a = getAsset(l.asset);
+          return (
+            '<div class="checkunit"><label class="tick"><input type="checkbox" name="back" value="' +
+            l.num +
+            '" /><span><strong>' +
+            esc(a.id + " · " + a.type) +
+            "</strong><small>" +
+            esc(a.model + " · tag " + a.id + " · slip L-" + l.num) +
+            '</small></span></label><div class="stillout" data-stillout="' +
+            l.num +
+            '">' +
+            pick("holder-" + l.num, "Who has it now?", people) +
+            pick("promised-" + l.num, "Back by", dues) +
+            "</div></div>"
+          );
+        })
+        .join("") +
+      '<div class="buttons"><button type="submit" class="primary">Save return</button>' +
+      btn("Cancel", "uncheck") +
+      "</div></form>"
+    );
+  }
   function deskbook() {
     let html = head(
       "Desk book",
@@ -318,7 +497,7 @@
         "I brought the projector and speaker. Leela Das has our adapter. She’ll be at the counter at 9 am tomorrow.",
       ]);
     for (const n of s.notes)
-      entries.push([shifts[n.phase].time, "Counter handover", n.text]);
+      entries.push([shifts[n.phase].time, n.by || "Counter handover", n.text]);
     for (const [t, author, body] of entries.slice().reverse())
       html +=
         '<article class="record"><small>' +
@@ -336,11 +515,28 @@
   const screens = {
     Requests: requestPage,
     Inventory: inventory,
-    "Loan register": register,
+    "Loan register": () => (s.view === "kits" ? kitRegister() : register()),
     "Desk book": deskbook,
   };
   function paint() {
     const phase = shifts[s.phase];
+    q("[data-compare]").innerHTML =
+      "<span>Loan register</span>" +
+      [
+        ["kits", "Proposed"],
+        ["slips", "Original"],
+      ]
+        .map(
+          ([v, t]) =>
+            '<button type="button" data-action="variant" data-val="' +
+            v +
+            '" aria-pressed="' +
+            (s.view === v) +
+            '">' +
+            t +
+            "</button>",
+        )
+        .join("");
     q("[data-clock]").textContent = phase.time;
     q("[data-shift-title]").textContent = phase.title;
     q("[data-shift]").textContent = phase.text;
@@ -363,6 +559,12 @@
       .join("");
     q("[data-page]").innerHTML = screens[s.tab]();
     if (q("[data-filter]")) q("[data-filter]").value = s.filter;
+    if (q("[data-person]")) q("[data-person]").value = s.person;
+    for (const sel of root.querySelectorAll("[data-checkin] select")) {
+      const [key, num] = sel.name.split("-");
+      const l = s.loans.find((x) => x.num === Number(num));
+      sel.value = (key === "holder" ? l.holder : l.promised) || "";
+    }
     q("[data-status]").textContent = s.notice;
   }
   function commit(msg) {
@@ -381,7 +583,19 @@
     const v = b.dataset.val;
     switch (b.dataset.action) {
       case "restart":
-        s = original();
+        s = { ...original(), view: s.view };
+        break;
+      case "variant":
+        s.view = v === "slips" ? "slips" : "kits";
+        s.checking = "";
+        s.editing = false;
+        break;
+      case "check":
+        s.checking = v;
+        s.editing = false;
+        break;
+      case "uncheck":
+        s.checking = "";
         break;
       case "advance":
         if (s.phase < 2) s.phase++;
@@ -390,6 +604,7 @@
       case "tab":
         s.tab = v;
         s.editing = false;
+        s.checking = "";
         break;
       case "close":
         s.selected = "";
@@ -399,6 +614,7 @@
         break;
       case "new":
         s.editing = true;
+        s.checking = "";
         break;
       case "cancel":
         s.editing = false;
@@ -421,6 +637,15 @@
       s.filter = e.target.value;
       commit();
     }
+    if (e.target.matches("[data-person]")) {
+      s.person = people.includes(e.target.value) ? e.target.value : "";
+      commit();
+    }
+    if (e.target.matches('[data-checkin] input[name="back"]')) {
+      const box = q('[data-stillout="' + e.target.value + '"]');
+      box.hidden = e.target.checked;
+      for (const x of box.querySelectorAll("select")) x.disabled = e.target.checked;
+    }
   });
   root.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -431,6 +656,79 @@
       if (!text) return;
       s.notes.push({ phase: s.phase, text });
       commit("Handover note saved.");
+      return;
+    }
+    if (f.matches("[data-checkin]")) {
+      const r = getReq(f.dataset.checkin);
+      const open = s.loans.filter((l) => r && l.req === r.id && !l.back);
+      const ticked = form.getAll("back").map(Number);
+      const back = open.filter((l) => ticked.includes(l.num));
+      const still = open.filter((l) => !ticked.includes(l.num));
+      for (const l of still) {
+        const holder = form.get("holder-" + l.num);
+        const promised = form.get("promised-" + l.num);
+        if (!people.includes(holder) || !dues.includes(promised)) {
+          q("[data-status]").textContent =
+            l.asset +
+            " isn’t ticked. Tick it if it’s on the counter, or record who has it and when it will be back.";
+          f.querySelector(
+            '[name="' +
+              (people.includes(holder) ? "promised-" : "holder-") +
+              l.num +
+              '"]',
+          ).focus();
+          return;
+        }
+      }
+      const from = list([...new Set(back.map(holderOf))]);
+      const moved = [];
+      for (const l of back) {
+        l.back = true;
+        l.backAt = s.phase;
+      }
+      for (const l of still) {
+        const holder = form.get("holder-" + l.num);
+        const promised = form.get("promised-" + l.num);
+        if (holder === l.holder && promised === l.promised) continue;
+        Object.assign(l, { holder, promised, promisedAt: s.phase });
+        moved.push(l);
+      }
+      s.checking = "";
+      const parts = [];
+      if (back.length)
+        parts.push(list(back.map((l) => shelf(l.asset))) + " back on the shelf.");
+      for (const l of still)
+        parts.push(
+          l.asset + " still out with " + l.holder + ", back by " + l.promised + ".",
+        );
+      if (!still.length) parts.push(r.club + " kit complete.");
+      if (moved.length)
+        s.notes.push({
+          phase: s.phase,
+          by: "Return record · " + r.club,
+          text:
+            r.event +
+            " (" +
+            r.id +
+            "): " +
+            (back.length
+              ? list(back.map((l) => l.asset)) + " back from " + from + ". "
+              : "") +
+            moved
+              .map(
+                (l) =>
+                  l.asset +
+                  " (slip L-" +
+                  l.num +
+                  ") still out with " +
+                  l.holder +
+                  ", back by " +
+                  l.promised +
+                  ".",
+              )
+              .join(" "),
+        });
+      commit(parts.join(" "));
       return;
     }
     if (!f.matches("[data-issue]")) return;
@@ -463,19 +761,31 @@
   function restore(d) {
     if (
       !d ||
-      d.version !== 1 ||
+      d.version !== 2 ||
+      !["kits", "slips"].includes(d.view) ||
+      (d.person && !people.includes(d.person)) ||
+      (d.checking && !getReq(d.checking)) ||
       !Object.hasOwn(screens, d.tab) ||
       !shifts[d.phase] ||
       (d.selected && !getReq(d.selected)) ||
       !Array.isArray(d.notes) ||
       !d.notes.every(
-        (n) => n && shifts[n.phase] && typeof n.text === "string",
+        (n) =>
+          n &&
+          shifts[n.phase] &&
+          typeof n.text === "string" &&
+          (n.by === undefined || typeof n.by === "string"),
       ) ||
       !Array.isArray(d.loans) ||
       !d.loans.length ||
       !d.loans.every(
         (l) =>
-          l && getReq(l.req) && getAsset(l.asset) && Number.isInteger(l.num),
+          l &&
+          getReq(l.req) &&
+          getAsset(l.asset) &&
+          Number.isInteger(l.num) &&
+          (l.holder === undefined || people.includes(l.holder)) &&
+          (l.promised === undefined || dues.includes(l.promised)),
       )
     )
       return;
